@@ -147,56 +147,156 @@ class AdvancedTitanicFlow(FlowSpec):
         self.next(self.exploratory_data_analysis)
         
     @step
-    def load_data(self):
+    def exploratory_data_analysis(self):
         """
-        Load and explore the Titanic dataset.
+        Perform exploratory data analysis and create visualizations.
         """
-        print(f"Loading data from {self.data_path}...")
+        print("Performing exploratory data analysis...")
         
-        try:
-            self.df = pd.read_csv(self.data_path)
-        except Exception as e:
-            print(f"Error loading data: {e}")
-            print("Please ensure the Titanic dataset is available at the specified path.")
-            print("You can download it from Kaggle: https://www.kaggle.com/c/titanic/data")
-            raise
+        # Create directory for visualizations
+        os.makedirs("eda_plots", exist_ok=True)
         
-        # Save a data description summary
-        self.data_summary = {
-            "shape": self.df.shape,
-            "columns": self.df.columns.tolist(),
-            "missing_values": self.df.isnull().sum().to_dict(),
-            "data_types": {col: str(dtype) for col, dtype in self.df.dtypes.items()}
-        }
-        
-        print(f"Dataset shape: {self.df.shape}")
-        print(f"Columns: {', '.join(self.df.columns)}")
-        print(f"Missing values: {self.df.isnull().sum().sum()} total")
-        
-        # Create a run with dataset info
-        with mlflow.start_run(run_name="data_summary") as run:
-            # Log dataset properties
-            mlflow.log_param("dataset_rows", self.df.shape[0])
-            mlflow.log_param("dataset_columns", self.df.shape[1])
-            mlflow.log_param("total_missing_values", self.df.isnull().sum().sum())
+        with mlflow.start_run(run_name="exploratory_analysis") as run:
+            # Log run ID
+            self.eda_run_id = run.info.run_id
             
-            # Create and log dataset summary
-            dataset_info = {
-                "shape": list(self.df.shape),
-                "columns": self.df.columns.tolist(),
-                "missing_values": self.df.isnull().sum().to_dict(),
-                "dtypes": {col: str(dtype) for col, dtype in self.df.dtypes.items()}
-            }
+            # 1. Survival distribution
+            plt.figure(figsize=(8, 6))
+            survival_counts = self.df['Survived'].value_counts()
+            ax = sns.barplot(x=survival_counts.index, y=survival_counts.values)
+            survival_rate = self.df['Survived'].mean() * 100
+            plt.title(f'Survival Distribution (Survival Rate: {survival_rate:.1f}%)')
+            plt.xlabel('Survived')
+            plt.ylabel('Count')
+            # Add count and percentage labels
+            for i, count in enumerate(survival_counts.values):
+                percentage = count / len(self.df) * 100
+                ax.text(i, count + 5, f"{count} ({percentage:.1f}%)", ha='center')
+            plt.tight_layout()
+            plt.savefig('eda_plots/survival_distribution.png')
+            mlflow.log_artifact('eda_plots/survival_distribution.png')
+            mlflow.log_metric("survival_rate", survival_rate)
+            plt.close()
             
-            # Write summary to file and log
-            with open("dataset_summary.json", "w") as f:
-                json.dump(dataset_info, f, indent=2)
-            mlflow.log_artifact("dataset_summary.json")
+            # 2. Survival by gender
+            plt.figure(figsize=(10, 6))
+            gender_survival = self.df.groupby(['Sex', 'Survived']).size().unstack()
+            gender_survival_pct = gender_survival.div(gender_survival.sum(axis=1), axis=0) * 100
             
-            # Track this run
-            self.data_run_id = run.info.run_id
+            ax = gender_survival.plot(kind='bar', stacked=True)
+            plt.title('Survival by Gender')
+            plt.xlabel('Gender')
+            plt.ylabel('Count')
+            plt.xticks(rotation=0)
+            
+            # Add percentages
+            for i, (idx, row) in enumerate(gender_survival_pct.iterrows()):
+                ax.text(i, gender_survival.loc[idx].sum() + 5, 
+                        f"Survived: {row[1]:.1f}%", ha='center')
+            
+            plt.tight_layout()
+            plt.savefig('eda_plots/survival_by_gender.png')
+            mlflow.log_artifact('eda_plots/survival_by_gender.png')
+            
+            # Log gender survival rates
+            if 1 in gender_survival_pct.columns:  # Column 1 is 'Survived'
+                for gender, rate in gender_survival_pct[1].items():
+                    mlflow.log_metric(f"{gender}_survival_rate", rate)
+            plt.close()
+            
+            # 3. Survival by passenger class
+            plt.figure(figsize=(10, 6))
+            pclass_survival = self.df.groupby(['Pclass', 'Survived']).size().unstack()
+            pclass_survival_pct = pclass_survival.div(pclass_survival.sum(axis=1), axis=0) * 100
+            
+            ax = pclass_survival.plot(kind='bar', stacked=True)
+            plt.title('Survival by Passenger Class')
+            plt.xlabel('Passenger Class')
+            plt.ylabel('Count')
+            plt.xticks(rotation=0)
+            
+            # Add percentages
+            for i, (idx, row) in enumerate(pclass_survival_pct.iterrows()):
+                ax.text(i, pclass_survival.loc[idx].sum() + 5, 
+                        f"Survived: {row[1]:.1f}%", ha='center')
+            
+            plt.tight_layout()
+            plt.savefig('eda_plots/survival_by_class.png')
+            mlflow.log_artifact('eda_plots/survival_by_class.png')
+            
+            # Log class survival rates
+            if 1 in pclass_survival_pct.columns:
+                for pclass, rate in pclass_survival_pct[1].items():
+                    mlflow.log_metric(f"class{pclass}_survival_rate", rate)
+            plt.close()
+            
+            # 4. Age distribution
+            plt.figure(figsize=(12, 6))
+            sns.histplot(data=self.df, x='Age', hue='Survived', 
+                         multiple='stack', bins=30, kde=True)
+            plt.title('Age Distribution by Survival')
+            plt.xlabel('Age')
+            plt.ylabel('Count')
+            plt.tight_layout()
+            plt.savefig('eda_plots/age_distribution.png')
+            mlflow.log_artifact('eda_plots/age_distribution.png')
+            plt.close()
+            
+            # 5. Fare distribution
+            plt.figure(figsize=(12, 6))
+            sns.histplot(data=self.df, x='Fare', hue='Survived', 
+                         multiple='stack', bins=30, kde=True)
+            plt.title('Fare Distribution by Survival')
+            plt.xlabel('Fare')
+            plt.ylabel('Count')
+            plt.tight_layout()
+            plt.savefig('eda_plots/fare_distribution.png')
+            mlflow.log_artifact('eda_plots/fare_distribution.png')
+            plt.close()
+            
+            # 6. Correlation matrix
+            plt.figure(figsize=(10, 8))
+            numeric_df = self.df.select_dtypes(include=['number'])
+            corr_matrix = numeric_df.corr()
+            mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+            sns.heatmap(corr_matrix, mask=mask, annot=True, cmap='coolwarm', 
+                        fmt='.2f', linewidths=0.5)
+            plt.title('Correlation Matrix')
+            plt.tight_layout()
+            plt.savefig('eda_plots/correlation_matrix.png')
+            mlflow.log_artifact('eda_plots/correlation_matrix.png')
+            plt.close()
+            
+            # 7. Family size and survival
+            self.df['FamilySize'] = self.df['SibSp'] + self.df['Parch'] + 1
+            plt.figure(figsize=(12, 6))
+            family_survival = self.df.groupby(['FamilySize', 'Survived']).size().unstack().fillna(0)
+            family_survival_pct = family_survival.div(family_survival.sum(axis=1), axis=0) * 100
+            
+            ax = family_survival.plot(kind='bar', stacked=True)
+            plt.title('Survival by Family Size')
+            plt.xlabel('Family Size')
+            plt.ylabel('Count')
+            
+            # Add percentages for family sizes with significant counts
+            for i, (idx, row) in enumerate(family_survival_pct.iterrows()):
+                if family_survival.loc[idx].sum() > 10:  # Only add text for family sizes with >10 people
+                    if 1 in row:
+                        ax.text(i, family_survival.loc[idx].sum() + 2, 
+                                f"Survived: {row[1]:.1f}%", ha='center')
+            
+            plt.tight_layout()
+            plt.savefig('eda_plots/survival_by_family_size.png')
+            mlflow.log_artifact('eda_plots/survival_by_family_size.png')
+            plt.close()
+            
+            # Log some key metrics from EDA
+            mlflow.log_metric("missing_age_pct", self.df['Age'].isnull().mean() * 100)
+            mlflow.log_metric("avg_fare", self.df['Fare'].mean())
+            mlflow.log_metric("avg_age", self.df['Age'].dropna().mean())
         
-        self.next(self.exploratory_data_analysis)
+        print("EDA completed. Visualizations saved and logged to MLflow.")
+        self.next(self.create_baselines)
     
     @step
     def create_baselines(self):
@@ -847,6 +947,17 @@ class AdvancedTitanicFlow(FlowSpec):
                 plt.savefig(coef_path)
                 mlflow.log_artifact(coef_path)
                 plt.close()
+                        
+            feature_importances_text = "Not applicable for this model type"
+            if model_type in ['rf', 'gb']:
+                # Create feature importances DataFrame for tree-based models
+                feature_importances = pd.DataFrame({
+                    'feature': X_train.columns,
+                    'importance': best_model.feature_importances_
+                }).sort_values('importance', ascending=False)
+                
+                # Generate the feature importance text
+                feature_importances_text = chr(10).join([f"- {row['feature']}" for _, row in feature_importances.head(5).iterrows()])
             
             # Create a model card with information about the model
             model_card = f"""# {self.model_names[model_type]} Model Card
@@ -871,7 +982,7 @@ class AdvancedTitanicFlow(FlowSpec):
 
 ## Feature Importance
 Top 5 most important features:
-{chr(10).join([f"- {row['feature']}" for _, row in feature_importances.head(5).iterrows()]) if model_type in ['rf', 'gb'] else "Not applicable for this model type"}
+{feature_importances_text}
 
 ## Training Information
 - **Cross-validation:** {cv}-fold
@@ -1073,167 +1184,331 @@ The {self.best_model_result["model_name"]} model achieved the highest accuracy o
             print(f"  Improvement over gender baseline: {self.best_model_result['metrics']['accuracy'] - self.baselines['gender']['accuracy']:.4f}")
         
         self.next(self.deploy_model)
-        
+
     @step
-    def join_models(self, inputs):
+    def deploy_model(self):
         """
-        Join results from all model types and compare them.
+        Prepare the best model for deployment.
+        Creates all the necessary artifacts for deploying the model in a production environment.
         """
-        print("Joining results from all models...")
+        print(f"Preparing {self.best_model_result['model_name']} model for deployment...")
         
-        # Collect results from each model
-        self.model_results = []
+        # Create a directory for deployment artifacts
+        os.makedirs("deployment", exist_ok=True)
         
-        for inp in inputs:
-            result = {
-                "model_type": inp.model_type,
-                "model_name": self.model_names[inp.model_type],
-                "best_model": inp.best_model,
-                "best_params": inp.best_params,
-                "best_cv_score": inp.best_cv_score,
-                "metrics": inp.metrics,
-                "feature_set": inp.feature_set,
-                "used_features": inp.used_features,
-                "run_id": inp.run_id
+        # 1. Save the trained model
+        model_path = "deployment/model.pkl"
+        with open(model_path, "wb") as f:
+            pickle.dump(self.best_model_result["best_model"], f)
+        
+        # 2. Save required feature names and order
+        with open("deployment/features.json", "w") as f:
+            json.dump(self.best_model_result["used_features"], f, indent=2)
+        
+        # 3. Create and save model metadata for documentation
+        metadata = {
+            "model_type": self.best_model_result["model_type"],
+            "model_name": self.best_model_result["model_name"],
+            "performance": {
+                "accuracy": self.best_model_result["metrics"]["accuracy"],
+                "precision": self.best_model_result["metrics"]["precision"],
+                "recall": self.best_model_result["metrics"]["recall"],
+                "f1": self.best_model_result["metrics"]["f1"]
+            },
+            "training_info": {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "feature_set": self.best_model_result["feature_set"],
+                "num_features": len(self.best_model_result["used_features"])
+            },
+            "hyperparameters": self.best_model_result["best_params"],
+            "baselines": {
+                name: {"accuracy": metrics["accuracy"]} 
+                for name, metrics in self.baselines.items()
             }
-            self.model_results.append(result)
+        }
         
-        # Find the best model based on accuracy
-        best_model_idx = np.argmax([result["metrics"]["accuracy"] for result in self.model_results])
-        self.best_model_result = self.model_results[best_model_idx]
+        with open("deployment/metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
         
-        # Create a comparison table
-        comparison_data = []
-        for result in self.model_results:
-            row = {
-                "Model": result["model_name"],
-                "Accuracy": result["metrics"]["accuracy"],
-                "Precision": result["metrics"]["precision"],
-                "Recall": result["metrics"]["recall"],
-                "F1": result["metrics"]["f1"],
-                "ROC AUC": result["metrics"]["roc_auc"] if result["metrics"]["roc_auc"] is not None else float('nan'),
-                "Features": len(result["used_features"]),
-                "CV Score": result["best_cv_score"]
+        # 4. Create a prediction script for inferencing
+        prediction_script = '''#!/usr/bin/env python
+# Titanic Survival Prediction Script
+# Generated by Advanced Titanic ML Flow
+import pandas as pd
+import pickle
+import json
+import sys
+import os
+
+def load_model(model_dir='.'):
+    """Load the trained model and associated metadata."""
+    with open(os.path.join(model_dir, 'model.pkl'), 'rb') as f:
+        model = pickle.load(f)
+    
+    with open(os.path.join(model_dir, 'features.json'), 'r') as f:
+        features = json.load(f)
+    
+    with open(os.path.join(model_dir, 'metadata.json'), 'r') as f:
+        metadata = json.load(f)
+    
+    return model, features, metadata
+
+def preprocess_passenger(passenger_data, required_features):
+    """
+    Preprocess passenger data to match the format expected by the model.
+    
+    Args:
+        passenger_data: Dictionary with passenger attributes
+        required_features: List of features required by the model
+        
+    Returns:
+        DataFrame with correctly formatted features
+    """
+    # Check for missing required features
+    features_missing = [f for f in required_features if f not in passenger_data]
+    if features_missing:
+        raise ValueError(f"Missing required features: {features_missing}")
+    
+    # Create a DataFrame with only the required features in the correct order
+    df = pd.DataFrame([passenger_data])
+    return df[required_features]
+
+def predict_survival(passenger_data, model_dir='.'):
+    """
+    Predict survival probability for a passenger.
+    
+    Args:
+        passenger_data: Dict with passenger attributes
+        model_dir: Directory containing model artifacts
+        
+    Returns:
+        Dict with prediction results
+    """
+    try:
+        # Load model and features
+        model, required_features, metadata = load_model(model_dir)
+        
+        # Preprocess data
+        features_df = preprocess_passenger(passenger_data, required_features)
+        
+        # Make prediction
+        survival_prob = model.predict_proba(features_df)[0, 1]
+        survival = model.predict(features_df)[0]
+        
+        # Return results with additional context
+        return {
+            'prediction': {
+                'survived': bool(survival),
+                'survival_probability': float(survival_prob)
+            },
+            'model_info': {
+                'type': metadata['model_name'],
+                'accuracy': metadata['performance']['accuracy'],
+                'training_date': metadata['training_info']['date']
             }
-            comparison_data.append(row)
-        
-        self.comparison_df = pd.DataFrame(comparison_data)
-        
-        # Log the comparison
-        with mlflow.start_run(run_name="model_comparison") as run:
-            # Track run ID
-            self.comparison_run_id = run.info.run_id
-            
-            # Log the best model
-            mlflow.log_param("best_model", self.best_model_result["model_name"])
-            mlflow.log_param("best_model_type", self.best_model_result["model_type"])
-            mlflow.log_metric("best_model_accuracy", self.best_model_result["metrics"]["accuracy"])
-            mlflow.log_metric("best_model_f1", self.best_model_result["metrics"]["f1"])
-            
-            # Log baseline comparisons
-            for baseline_name, baseline_metrics in self.baselines.items():
-                improvement = self.best_model_result["metrics"]["accuracy"] - baseline_metrics["accuracy"]
-                mlflow.log_metric(f"best_model_improvement_over_{baseline_name}", improvement)
-            
-            # Create comparison table visualization
-            plt.figure(figsize=(12, 6))
-            metrics = ['Accuracy', 'Precision', 'Recall', 'F1']
-            metrics_df = self.comparison_df[['Model'] + metrics].melt(
-                id_vars='Model', 
-                var_name='Metric', 
-                value_name='Value'
-            )
-            sns.barplot(x='Model', y='Value', hue='Metric', data=metrics_df)
-            plt.title('Model Comparison - Performance Metrics')
-            plt.ylim(0, 1.0)
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-            plt.savefig('model_comparison.png')
-            mlflow.log_artifact('model_comparison.png')
-            plt.close()
-            
-            # Create ROC AUC comparison
-            if not self.comparison_df['ROC AUC'].isna().all():
-                plt.figure(figsize=(10, 6))
-                valid_roc = self.comparison_df[~self.comparison_df['ROC AUC'].isna()]
-                sns.barplot(x='Model', y='ROC AUC', data=valid_roc)
-                plt.title('Model Comparison - ROC AUC')
-                plt.ylim(0.5, 1.0)
-                plt.xticks(rotation=45)
-                plt.tight_layout()
-                plt.savefig('roc_auc_comparison.png')
-                mlflow.log_artifact('roc_auc_comparison.png')
-                plt.close()
-            
-            # Save comparison data
-            self.comparison_df.to_csv('model_comparison.csv', index=False)
-            mlflow.log_artifact('model_comparison.csv')
-            
-            # Create a model comparison report
-            report = f"""# Model Comparison Report
+        }
+    except Exception as e:
+        return {
+            'error': str(e),
+            'survived': None,
+            'survival_probability': None
+        }
 
-## Best Performing Model: {self.best_model_result["model_name"]}
+def create_example_input():
+    """Create an example input for demonstration purposes."""
+    # This is a simplified example - adjust based on actual features needed
+    return {
+        # Include example values for all required features
+        # These should match the feature names in features.json
+    }
 
-### Performance Metrics
+if __name__ == '__main__':
+    # Parse command line arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '--example':
+            # Print an example of expected input
+            example = create_example_input()
+            print(json.dumps(example, indent=2))
+            sys.exit(0)
+        elif sys.argv[1] == '--help' or sys.argv[1] == '-h':
+            print("Usage:")
+            print("  python predict.py --example    # Show example input")
+            print("  python predict.py '{\"feature1\": value1, ...}'   # Make prediction")
+            print("  python predict.py --batch input.json    # Process batch file")
+            sys.exit(0)
+        elif sys.argv[1] == '--batch' and len(sys.argv) > 2:
+            # Process a batch of predictions from a file
+            with open(sys.argv[2], 'r') as f:
+                batch_data = json.load(f)
+            
+            results = []
+            for item in batch_data:
+                results.append(predict_survival(item))
+            
+            print(json.dumps(results, indent=2))
+            sys.exit(0)
+        else:
+            # Try to parse JSON from command line
+            try:
+                passenger_data = json.loads(sys.argv[1])
+                result = predict_survival(passenger_data)
+                print(json.dumps(result, indent=2))
+            except json.JSONDecodeError:
+                print("Error: Invalid JSON input")
+                sys.exit(1)
+    else:
+        # No arguments, use an example
+        example = create_example_input()
+        print("Using example passenger data:")
+        print(json.dumps(example, indent=2))
+        result = predict_survival(example)
+        print("\\nPrediction result:")
+        print(json.dumps(result, indent=2))
+'''
+        
+        with open("deployment/predict.py", "w") as f:
+            f.write(prediction_script)
+        
+        # 5. Create a comprehensive README with deployment instructions
+        readme = f'''# Titanic Survival Prediction Model
+
+## Model Overview
+- **Model Type:** {self.best_model_result["model_name"]}
 - **Accuracy:** {self.best_model_result["metrics"]["accuracy"]:.4f}
+- **Training Date:** {datetime.now().strftime('%Y-%m-%d')}
+
+## Performance Metrics
 - **Precision:** {self.best_model_result["metrics"]["precision"]:.4f}
 - **Recall:** {self.best_model_result["metrics"]["recall"]:.4f}
 - **F1 Score:** {self.best_model_result["metrics"]["f1"]:.4f}
-{f'- **ROC AUC:** {self.best_model_result["metrics"]["roc_auc"]:.4f}' if self.best_model_result["metrics"]["roc_auc"] is not None else ""}
 
-### Best Configuration
-- **Feature set:** {self.best_model_result["feature_set"]} ({len(self.best_model_result["used_features"])} features)
-- **Best parameters:** {json.dumps(self.best_model_result["best_params"], indent=2).replace('{', '').replace('}', '').replace('"', '')}
-
-### Baseline Comparisons
+## Baseline Comparisons
 {chr(10).join([f"- **{baseline_name.capitalize()} Baseline:** {metrics['accuracy']:.4f} (Improvement: {self.best_model_result['metrics']['accuracy'] - metrics['accuracy']:.4f})" for baseline_name, metrics in self.baselines.items()])}
 
-## Model Rankings
+## Deployment Instructions
 
-| Model | Accuracy | Precision | Recall | F1 | ROC AUC | Features | CV Score |
-|-------|----------|-----------|--------|-----|---------|----------|----------|
-{chr(10).join([f"| {row['Model']} | {row['Accuracy']:.4f} | {row['Precision']:.4f} | {row['Recall']:.4f} | {row['F1']:.4f} | {row['ROC AUC']:.4f if not pd.isna(row['ROC AUC']) else 'N/A'} | {row['Features']} | {row['CV Score']:.4f} |" for _, row in self.comparison_df.iterrows()])}
+### Setup
+1. Copy the contents of this directory to your deployment environment
+2. Ensure Python 3.6+ is installed
+3. Install required packages: `pip install pandas scikit-learn`
+4. Make the prediction script executable: `chmod +x predict.py`
 
-## Analysis
+### Command Line Usage
+```bash
+# Show help
+python predict.py --help
 
-The {self.best_model_result["model_name"]} model achieved the highest accuracy of {self.best_model_result["metrics"]["accuracy"]:.4f}, which represents a {(self.best_model_result["metrics"]["accuracy"] - self.baselines["gender"]["accuracy"]):.4f} improvement over the gender-based baseline.
+# Get example input format
+python predict.py --example
 
-### Key Findings
+# Make a prediction with JSON input
+python predict.py '{"feature1": value1, "feature2": value2, ...}'
 
-1. The gender feature remains highly predictive across all models
-2. Passenger class and fare are also consistently important features
-3. Feature engineering improved model performance by capturing interactions and creating more informative features
+# Process a batch file
+python predict.py --batch passengers.json
+```
 
-## Next Steps
+### Web API Integration
+The `predict.py` script can be easily integrated with web frameworks:
 
-1. Deploy the best model for predictions
-2. Consider ensemble methods to further improve performance
-3. Gather additional data or features if available
-"""
+#### Flask Example
+```python
+from flask import Flask, request, jsonify
+from predict import predict_survival
+
+app = Flask(__name__)
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    passenger_data = request.json
+    result = predict_survival(passenger_data)
+    return jsonify(result)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+```
+
+#### FastAPI Example
+```python
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Dict, Any
+from predict import predict_survival
+
+app = FastAPI(title="Titanic Survival Predictor")
+
+class PassengerData(BaseModel):
+    # Define passenger data schema based on required features
+    pass
+
+@app.post("/predict")
+async def predict(passenger: PassengerData):
+    result = predict_survival(passenger.dict())
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+```
+
+## Model Monitoring Recommendations
+1. **Track prediction distribution** - Monitor for drift over time
+2. **Log feature values** - Detect changes in input distributions
+3. **Performance monitoring** - Periodically validate predictions
+4. **Retraining schedule** - Update model with new data monthly/quarterly
+5. **A/B testing** - Compare this model against new versions
+
+## Files in this Package
+- `model.pkl` - The serialized model
+- `features.json` - Required features and their order
+- `metadata.json` - Model information and performance metrics
+- `predict.py` - Prediction script for using the model
+- `README.md` - This documentation
+'''
+        
+        with open("deployment/README.md", "w") as f:
+            f.write(readme)
+        
+        # 6. Log all deployment artifacts to MLflow for traceability
+        with mlflow.start_run(run_name="model_deployment") as run:
+            # Track run ID
+            self.deployment_run_id = run.info.run_id
             
-            with open('model_comparison_report.md', 'w') as f:
-                f.write(report)
-            mlflow.log_artifact('model_comparison_report.md')
+            # Log artifacts with appropriate organization
+            mlflow.log_artifact("deployment/model.pkl", "deployment")
+            mlflow.log_artifact("deployment/features.json", "deployment")
+            mlflow.log_artifact("deployment/metadata.json", "deployment")
+            mlflow.log_artifact("deployment/predict.py", "deployment")
+            mlflow.log_artifact("deployment/README.md", "deployment")
             
-            # Register the best model in the MLflow registry
+            # Create and log deployment metadata for MLflow
+            deployment_info = {
+                "model_name": self.best_model_result["model_name"],
+                "model_type": self.best_model_result["model_type"],
+                "accuracy": self.best_model_result["metrics"]["accuracy"],
+                "deployment_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "mlflow_run_id": self.best_model_result["run_id"],
+                "mlflow_model_path": f"runs:/{self.best_model_result['run_id']}/{self.best_model_result['model_type']}_model",
+                "recommended_monitoring_frequency": "Weekly",
+                "retraining_schedule": "Monthly"
+            }
+            
+            with open("deployment_info.json", "w") as f:
+                json.dump(deployment_info, f, indent=2)
+            
+            mlflow.log_artifact("deployment_info.json")
+            
+            # Log model as registered model for easier tracking
             mlflow.sklearn.log_model(
-                self.best_model_result["best_model"], 
-                "best_model",
-                registered_model_name="titanic_best_model",
-                signature=mlflow.models.signature.infer_signature(
-                    inputs[0].X_test.iloc[:5] if hasattr(inputs[0], 'X_test') else None,
-                    self.best_model_result["best_model"].predict(inputs[0].X_test.iloc[:5]) if hasattr(inputs[0], 'X_test') else None
-                ),
-                input_example=inputs[0].X_test.iloc[:5] if hasattr(inputs[0], 'X_test') else None
+                self.best_model_result["best_model"],
+                "deployment_ready_model",
+                registered_model_name=f"titanic_{self.best_model_result['model_type']}_model"
             )
         
-        print("Model comparison complete:")
-        print(f"  Best model: {self.best_model_result['model_name']} with accuracy {self.best_model_result['metrics']['accuracy']:.4f}")
-        print(f"  Improvement over majority baseline: {self.best_model_result['metrics']['accuracy'] - self.baselines['majority']['accuracy']:.4f}")
-        if 'gender' in self.baselines:
-            print(f"  Improvement over gender baseline: {self.best_model_result['metrics']['accuracy'] - self.baselines['gender']['accuracy']:.4f}")
+        print(f"Model deployment preparation complete:")
+        print(f"  Model: {self.best_model_result['model_name']}")
+        print(f"  Deployment artifacts saved to ./deployment directory")
+        print(f"  To use the model in production, follow instructions in deployment/README.md")
         
-        self.next(self.deploy_model)
+        self.next(self.end)
     
     @step
     def end(self):
