@@ -13,6 +13,30 @@ mlruns/
 *.pkl
 model/
 
+# Generated deployment artifacts
+deployment/
+
+# Generated images and plots
+*.png
+
+# Generated model cards and documentation
+*_model_card.md
+model_comparison_report.md
+feature_*.md
+model_*.md
+
+# Generated text files and reports
+feature_importances.csv
+model_comparison.csv
+simple_model_description.txt
+*_decision_tree.*
+
+# Generated JSON files in root directory
+/*.json
+feature_*.json
+dataset_*.json
+deployment_*.json
+
 # Python cache files
 __pycache__/
 *.py[cod]
@@ -38,6 +62,3 @@ ENV/
 
 # Environment variables
 .env
-
-# Generated images
-*.png
